@@ -11,26 +11,7 @@ AuroraWatch API ─┘
 
 ## What it shows
 
-```
-┌──────────────┬─────────────────┬─────────────────┐
-│              │                 │                 │
-│  DATE        │  SUN            │  MOON           │
-│  Mon         │  rise  07:08   │    ╭───╮        │
-│  17 Feb      │  set   16:52   │   │░░░░│        │
-│  2026        │                 │    ╰───╯        │
-│              │                 │  Waxing Crescent│
-│              │                 │  32%  day 4     │
-├──────────────┼─────────────────┼─────────────────┤
-│              │                 │                 │
-│  PLANETS     │  AURORA         │  ISS PASS       │
-│  Mercury W   │  29 nT         │  04:34          │
-│  Jupiter E   │  LOW            │  17 Feb         │
-│  Saturn SW   │                 │  SW>E max 19    │
-│              │                 │  10m visible    │
-│              │                 │                 │
-└──────────────┴─────────────────┴─────────────────┘
-UPD 00:14                                      87%
-```
+![M5Paper astronomy dashboard](IMG_2614.JPG)
 
 - **Date** — weekday, day month, year (from RTC, synced via NTP)
 - **Sun** — sunrise and sunset times for London
