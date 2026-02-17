@@ -1,0 +1,25 @@
+.env
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+
+# Project notes (contains personal IPs, SSH details, etc.)
+claude.md
+CLAUDE.md
+
+# PlatformIO
+firmware/.pio/
+firmware/.vscode/
+firmware/.venv/
+firmware/platformio_override.ini
+
+# Server runtime data
+server/.venv/
+server/dashboard.json
+server/iss_tle.json
+server/cron.log
+server/http.log
+
+# Backup files
+*.bak
