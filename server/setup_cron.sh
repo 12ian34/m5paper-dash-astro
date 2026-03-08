@@ -21,14 +21,23 @@ cd "$DIR"
 uv sync
 
 # Build cron entries
-UPDATE_JOB="14,44 * * * * cd $DIR && $VENV $UPDATE_SCRIPT >> $DIR/cron.log 2>&1"
-SERVER_JOB="@reboot cd $DIR && $VENV $SERVE_SCRIPT 8081 > $DIR/http.log 2>&1 &"
+CRON_TAG="m5paper-dash-astro"
+UPDATE_JOB="14,44 * * * * cd $DIR && $VENV $UPDATE_SCRIPT >> $DIR/cron.log 2>&1 # ${CRON_TAG}:update"
+SERVER_JOB="@reboot cd $DIR && $VENV $SERVE_SCRIPT 8081 > $DIR/http.log 2>&1 & # ${CRON_TAG}:serve"
 
 # Add to crontab (preserving existing entries)
-{ crontab -l 2>/dev/null | grep -v -E 'update_dashboard\.py|serve\.py 8081|python3 -m http\.server 8081|http\.server 8081'; printf '%s\n%s\n' "$UPDATE_JOB" "$SERVER_JOB"; } | crontab -
+CURRENT_CRON="$(crontab -l 2>/dev/null || true)"
+CLEANED_CRON="$(printf '%s\n' "$CURRENT_CRON" \
+  | grep -v -F "${CRON_TAG}:" \
+  | grep -v -F "cd $DIR && $VENV update_dashboard.py" \
+  | grep -v -F "cd $DIR && $VENV $UPDATE_SCRIPT" \
+  | grep -v -F "cd $DIR && python3 $DIR/serve.py 8081" \
+  | grep -v -F "cd $DIR && $VENV $SERVE_SCRIPT 8081" \
+  | grep -v -E 'python3 -m http\.server 8081|http\.server 8081')"
+{ printf '%s\n' "$CLEANED_CRON"; printf '%s\n%s\n' "$UPDATE_JOB" "$SERVER_JOB"; } | crontab -
 
 echo "Cron jobs installed:"
-crontab -l | grep -E 'update_dashboard|serve.py 8081'
+crontab -l | grep -F "${CRON_TAG}:"
 echo ""
 echo "Starting file server now..."
 pkill -f "serve.py 8081" 2>/dev/null || true
