@@ -53,7 +53,9 @@ Any Pi that can run Python and stay on your network. Serves the dashboard JSON o
 
 ## Setup
 
-### 1. Clone & configure
+No API keys are required for this dashboard.
+
+### 1. Build & flash the firmware
 
 ```bash
 git clone https://github.com/12ian34/m5paper-dash-astro.git
@@ -61,7 +63,7 @@ cd m5paper-dash-astro
 cp .env.example .env
 ```
 
-Edit `.env` with your details:
+Edit `.env` in your local checkout:
 
 ```
 WIFI_SSID=your_wifi_ssid
@@ -69,41 +71,12 @@ WIFI_PASS=your_wifi_password
 DASHBOARD_URL=http://your-pi-ip:8081/dashboard.json
 ```
 
-### 2. Set up the Pi
-
-Copy the server files to your Pi:
+Install PlatformIO and flash:
 
 ```bash
-scp server/update_dashboard.py server/serve.py server/setup_cron.sh server/requirements.txt user@your-pi:~/m5-astro/server/
-scp .env user@your-pi:~/m5-astro/
-```
-
-On the Pi, set up the venv and cron jobs:
-
-```bash
-cd ~/m5-astro/server
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-bash setup_cron.sh
-```
-
-This installs two cron jobs:
-- **Every 30 min** (`14,44 * * * *`): computes astronomy data and writes `dashboard.json`
-- **On boot** (`@reboot`): starts the HTTP server on port 8081
-
-### 3. Build & flash the firmware
-
-You need [PlatformIO](https://platformio.org/install) and a Python venv:
-
-```bash
-python3 -m venv .venv
+uv venv .venv
 source .venv/bin/activate
-pip install platformio
-```
-
-Connect the M5Paper via USB-C, then:
-
-```bash
+uv pip install pip platformio
 cd firmware
 pio run -t upload
 ```
@@ -115,6 +88,36 @@ PlatformIO will auto-detect the serial port. If you have multiple serial devices
 upload_port = /dev/cu.usbserial-XXXXX
 monitor_port = /dev/cu.usbserial-XXXXX
 ```
+
+### 2. On the Raspberry Pi: clone and configure `.env`
+
+```bash
+git clone https://github.com/12ian34/m5paper-dash-astro.git
+cd m5paper-dash-astro
+cp .env.example .env
+```
+
+Edit `.env` in that Pi checkout:
+
+```
+WIFI_SSID=your_wifi_ssid
+WIFI_PASS=your_wifi_password
+DASHBOARD_URL=http://your-pi-ip:8081/dashboard.json
+```
+
+### 3. On the Raspberry Pi: sync and install cron
+
+```bash
+cd server
+uv sync
+bash setup_cron.sh
+```
+
+`setup_cron.sh` auto-detects its own `server/` path and works from fish/zsh/bash when run as `bash setup_cron.sh`.
+
+This installs two cron jobs:
+- **Every 30 min** (`14,44 * * * *`): computes astronomy data and writes `dashboard.json`
+- **On boot** (`@reboot`): starts the HTTP server on port 8081
 
 ### 4. First boot
 
@@ -205,7 +208,7 @@ AuroraWatch UK measures geomagnetic disturbance in nanotesla (nT):
 │   ├── update_dashboard.py    # Computes astronomy data, writes dashboard.json
 │   ├── serve.py               # Threaded HTTP file server
 │   ├── setup_cron.sh          # Installs cron jobs on the Pi
-│   └── requirements.txt       # Python dependencies (httpx, python-dotenv, ephem)
+│   └── pyproject.toml         # Python dependencies for `uv sync`
 ├── .env.example               # Template for required environment variables
 └── README.md
 ```
@@ -248,6 +251,15 @@ The default HTTP port is 8081 (to coexist with other services). Change it in `se
 - Run `ls /dev/cu.usb*` to find your device
 - Create `firmware/platformio_override.ini` with the correct port
 - Try a different USB-C cable (some are charge-only)
+
+### Cron maintenance
+
+- See only dashboard cron lines:
+  `crontab -l | grep -E 'update_dashboard.py|serve.py 8081'`
+- Remove old dashboard cron entries before reinstalling:
+  `crontab -l | grep -v -E 'update_dashboard\\.py|serve\\.py 8081|http\\.server 8081' | crontab -`
+- Reinstall cleanly from repo checkout:
+  `cd /path/to/your/checkout/server && bash setup_cron.sh`
 
 ## Notes
 
