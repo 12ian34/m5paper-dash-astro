@@ -502,7 +502,7 @@ void drawInlays(int battPct) {
 
     // Bottom-left: updated time
     char timeBuf[24];
-    snprintf(timeBuf, sizeof(timeBuf), "UPD %02d:%02d", t.hour, t.min);
+    snprintf(timeBuf, sizeof(timeBuf), "updated: %02d:%02d", t.hour, t.min);
     canvas.setTextDatum(BL_DATUM);
     canvas.setTextSize(2);
     canvas.setTextColor(C_MID);
