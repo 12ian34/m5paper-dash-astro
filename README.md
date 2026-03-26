@@ -13,7 +13,7 @@ AuroraWatch API ─┘
 
 ![M5Paper astronomy dashboard](IMG_2614.JPG)
 
-- **Date** — weekday, day month, year (from RTC, synced via NTP)
+- **Date** — weekday, day month, year, plus an annual daylight curve showing hours of daylight for every day of the year at London's latitude, with today marked
 - **Sun** — sunrise and sunset times, plus an equirectangular world map showing the real-time day/night terminator with sun and moon zenith markers
 - **Moon** — phase disc visualisation, phase name, illumination %, day of cycle, and dates of the next full moon and new moon
 - **Planets** — naked-eye planets visible tonight with 16-point compass direction (e.g. SSW, NNE) and altitude above the horizon in degrees

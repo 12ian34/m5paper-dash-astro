@@ -661,11 +661,22 @@ void drawIssTile(int col, int row, JsonObject& iss) {
 
 // ---- Date tile (vertical stack: weekday, day month, year) ----
 
+// Daylight hours for a given day of year at London's latitude
+static float daylightHours(int doy) {
+    const float latR = 51.5074f * M_PI / 180.0f;
+    float decl = 23.44f * sinf((360.0f / 365.0f) * (doy - 81) * M_PI / 180.0f);
+    float declR = decl * M_PI / 180.0f;
+    float cosHA = -tanf(latR) * tanf(declR);
+    if (cosHA < -1.0f) return 24.0f;  // midnight sun
+    if (cosHA >  1.0f) return 0.0f;   // polar night
+    float ha = acosf(cosHA) * 180.0f / M_PI;
+    return 2.0f * ha / 15.0f;
+}
+
 void drawDateTile(int col, int row) {
     int x  = col * TW;
     int y  = row * TH;
     int cx = x + TW / 2;
-    drawLabel(cx, y + 18, "DATE");
 
     rtc_date_t d;
     M5.RTC.getDate(&d);
@@ -675,21 +686,91 @@ void drawDateTile(int col, int row) {
                             "Jul","Aug","Sep","Oct","Nov","Dec"};
     int w = (d.week >= 0 && d.week <= 6) ? d.week : 0;
 
+    // Compact date at the top
     canvas.setTextDatum(TC_DATUM);
     canvas.setTextSize(4);
     canvas.setTextColor(C_BLACK);
-    canvas.drawString(weekdays[w], cx, y + 65);
+    canvas.drawString(weekdays[w], cx, y + 8);
 
     char dayMon[16];
     snprintf(dayMon, sizeof(dayMon), "%d %s", d.day,
              (d.mon >= 1 && d.mon <= 12) ? months[d.mon] : "???");
-    canvas.drawString(dayMon, cx, y + 115);
+    canvas.drawString(dayMon, cx, y + 50);
 
     char yearBuf[8];
     snprintf(yearBuf, sizeof(yearBuf), "%04d", d.year);
-    canvas.setTextSize(3);
+    canvas.setTextSize(2);
     canvas.setTextColor(C_DARK);
-    canvas.drawString(yearBuf, cx, y + 165);
+    canvas.drawString(yearBuf, cx, y + 90);
+
+    // Chart title
+    canvas.setTextSize(2);
+    canvas.setTextColor(C_MID);
+    canvas.setTextDatum(TC_DATUM);
+    canvas.drawString("daylight hours", cx, y + 108);
+
+    // Annual daylight chart
+    const int chartL = x + 20;
+    const int chartR = x + TW - 20;
+    const int chartW = chartR - chartL;
+    const int chartT = y + 120;
+    const int chartB = y + 255;
+    const int chartH = chartB - chartT;
+
+    const float minH = 0.0f;
+    const float maxH = 24.0f;
+
+    int todayDoy = dayOfYear(d.year, d.mon, d.day);
+    int prevPy = -1;
+
+    for (int px = 0; px < chartW; px++) {
+        int doy = 1 + px * 365 / chartW;
+        float hours = daylightHours(doy);
+        int py = chartB - (int)((hours - minH) / (maxH - minH) * chartH);
+        if (py < chartT) py = chartT;
+        if (py > chartB) py = chartB;
+
+        // Fill below the curve with a light shade (daylight area)
+        if (chartB - py > 1) {
+            canvas.drawFastVLine(chartL + px, py, chartB - py, 2);
+        }
+
+        // Draw curve line
+        if (prevPy >= 0) {
+            canvas.drawLine(chartL + px - 1, prevPy, chartL + px, py, C_BLACK);
+        }
+        prevPy = py;
+    }
+
+    // Baseline
+    canvas.drawLine(chartL, chartB, chartR, chartB, C_MID);
+
+    // Today marker — vertical line
+    int todayPx = chartL + todayDoy * chartW / 365;
+    float todayH = daylightHours(todayDoy);
+    int todayPy = chartB - (int)((todayH - minH) / (maxH - minH) * chartH);
+    canvas.drawFastVLine(todayPx, todayPy - 3, chartB - todayPy + 3, C_BLACK);
+    canvas.fillCircle(todayPx, todayPy, 4, C_BLACK);
+
+    // Daylight hours label next to the dot
+    char hlabel[8];
+    snprintf(hlabel, sizeof(hlabel), "%.0fh", todayH);
+    canvas.setTextSize(2);
+    canvas.setTextColor(C_BLACK);
+    canvas.setTextDatum((todayDoy > 182) ? TR_DATUM : TL_DATUM);
+    int labelX = (todayDoy > 182) ? todayPx - 8 : todayPx + 8;
+    canvas.drawString(hlabel, labelX, todayPy - 10);
+
+    // Month labels along the bottom
+    canvas.setTextSize(1);
+    canvas.setTextColor(C_MID);
+    canvas.setTextDatum(TC_DATUM);
+    const char* mAbbr[] = {"J","F","M","A","M","J","J","A","S","O","N","D"};
+    const int mDays[] = {15,46,74,105,135,166,196,227,258,288,319,349};
+    for (int i = 0; i < 12; i++) {
+        int mx = chartL + mDays[i] * chartW / 365;
+        canvas.drawString(mAbbr[i], mx, chartB + 4);
+    }
 }
 
 // ---- Small corner inlays (updated-at time + battery) ----
