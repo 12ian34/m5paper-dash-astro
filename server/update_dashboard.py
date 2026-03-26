@@ -95,10 +95,20 @@ def moon_phase() -> dict:
     else:
         name = "New Moon"
 
+    # Next new moon and full moon
+    cycles_elapsed = days_since / cycle
+    next_new_dt = ref + timedelta(days=math.ceil(cycles_elapsed) * cycle)
+    next_full_days = (math.floor(cycles_elapsed) + 0.5) * cycle
+    next_full_dt = ref + timedelta(days=next_full_days)
+    if next_full_dt <= now:
+        next_full_dt += timedelta(days=cycle)
+
     return {
         "name": name,
         "age_days": round(age, 1),
         "illumination_pct": round(illumination * 100, 1),
+        "next_new": next_new_dt.strftime("%-d %b"),
+        "next_full": next_full_dt.strftime("%-d %b"),
     }
 
 
@@ -140,9 +150,12 @@ def sun_times() -> dict:
 
 
 def azimuth_to_compass(az_deg: float) -> str:
-    """Convert azimuth in degrees to 8-point compass direction."""
-    dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-    idx = round(az_deg / 45) % 8
+    """Convert azimuth in degrees to 16-point compass direction."""
+    dirs = [
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+        "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+    ]
+    idx = round(az_deg / 22.5) % 16
     return dirs[idx]
 
 
@@ -183,6 +196,7 @@ def visible_planets() -> dict:
             visible.append({
                 "name": name,
                 "dir": azimuth_to_compass(az_deg),
+                "alt": round(alt_deg),
             })
 
     return {"planets": visible}

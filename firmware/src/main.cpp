@@ -18,6 +18,7 @@
 #include <esp_task_wdt.h>
 #include <esp_wifi.h>
 #include "time.h"
+#include "landmap.h"
 
 // ---- CONFIG (injected from .env at build time) ----
 #ifndef WIFI_SSID
@@ -234,26 +235,149 @@ void drawTile(int col, int row, const char* label, const char* value,
 
 // ---- Sun tile ----
 
-void drawSunTile(int col, int row, const char* rise, const char* set) {
+// Day of week: 0=Sun, 1=Mon, ..., 6=Sat (Tomohiko Sakamoto)
+static int dayOfWeek(int y, int m, int d) {
+    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (m < 3) y--;
+    return (y + y/4 - y/100 + y/400 + t[m-1] + d) % 7;
+}
+
+// RTC stores UK local time (GMT or BST). Return BST offset (0 or 1).
+static int bstOffset(int year, int mon, int day, int hour) {
+    if (mon >= 4 && mon <= 9) return 1;
+    if (mon <= 2 || mon >= 11) return 0;
+    int lastSun = 31 - dayOfWeek(year, mon, 31);
+    if (mon == 3) return (day > lastSun || (day == lastSun && hour >= 1)) ? 1 : 0;
+    // October: BST ends at 02:00 BST = 01:00 UTC
+    return (day < lastSun || (day == lastSun && hour < 2)) ? 1 : 0;
+}
+
+static float solarElevation(float lat, float lon, float utcHourF, int doy) {
+    float decl = 23.44f * sinf((360.0f / 365.0f) * (doy - 81) * M_PI / 180.0f);
+    float hourAngle = (15.0f * (utcHourF - 12.0f) + lon) * M_PI / 180.0f;
+    float latR = lat * M_PI / 180.0f;
+    float declR = decl * M_PI / 180.0f;
+    return sinf(latR) * sinf(declR) + cosf(latR) * cosf(declR) * cosf(hourAngle);
+}
+
+static bool isLand(int mapX, int mapY) {
+    if (mapX < 0 || mapX >= LANDMAP_W || mapY < 0 || mapY >= LANDMAP_H) return false;
+    int byteIdx = mapY * LANDMAP_ROW_BYTES + mapX / 8;
+    int bitIdx  = 7 - (mapX % 8);
+    return pgm_read_byte(&LANDMAP[byteIdx]) & (1 << bitIdx);
+}
+
+static int dayOfYear(int year, int month, int day) {
+    static const int mdays[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    int doy = mdays[month - 1] + day;
+    if (month > 2 && (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0)) doy++;
+    return doy;
+}
+
+void drawSunTile(int col, int row, const char* rise, const char* set,
+                 float moonAgeDays) {
     int x  = col * TW;
     int y  = row * TH;
-    int cx = x + TW / 2;
-    drawLabel(cx, y + 10, "SUN");
 
+    // Rise and set side by side, compact
     canvas.setTextDatum(TC_DATUM);
-    canvas.setTextSize(3);
+    canvas.setTextSize(2);
     canvas.setTextColor(C_MID);
-    canvas.drawString("rise", cx, y + 55);
-    canvas.setTextSize(5);
-    canvas.setTextColor(C_BLACK);
-    canvas.drawString(rise, cx, y + 85);
+    canvas.drawString("rise", x + TW / 4, y + 6);
+    canvas.drawString("set", x + 3 * TW / 4, y + 6);
 
-    canvas.setTextSize(3);
-    canvas.setTextColor(C_MID);
-    canvas.drawString("set", cx, y + 155);
-    canvas.setTextSize(5);
+    canvas.setTextSize(4);
     canvas.setTextColor(C_BLACK);
-    canvas.drawString(set, cx, y + 185);
+    canvas.drawString(rise, x + TW / 4, y + 28);
+    canvas.drawString(set, x + 3 * TW / 4, y + 28);
+
+    // World map with day/night terminator
+    const int mapW = 300;
+    const int mapH = 150;
+    const int mX   = x + (TW - mapW) / 2;
+    const int mY   = y + 75;
+
+    // Convert RTC local time (UK) to UTC
+    rtc_time_t t;
+    rtc_date_t d;
+    M5.RTC.getTime(&t);
+    M5.RTC.getDate(&d);
+    int offset = bstOffset(d.year, d.mon, d.day, t.hour);
+    int utcH = t.hour - offset;
+    int utcDay = d.day;
+    if (utcH < 0) { utcH += 24; utcDay--; }
+    float utcHourF = utcH + t.min / 60.0f;
+    int doy = dayOfYear(d.year, d.mon, utcDay);
+
+    // Solar declination for zenith markers
+    float decl = 23.44f * sinf((360.0f / 365.0f) * (doy - 81) * M_PI / 180.0f);
+
+    const uint8_t DAY_OCEAN   = 0;
+    const uint8_t DAY_LAND    = 3;
+    const uint8_t NIGHT_OCEAN = 10;
+    const uint8_t NIGHT_LAND  = 13;
+
+    for (int py = 0; py < mapH; py++) {
+        float lat = 90.0f - (py * 180.0f / mapH);
+        int bmY = py * LANDMAP_H / mapH;
+
+        for (int px = 0; px < mapW; px++) {
+            float lon = -180.0f + (px * 360.0f / mapW);
+            int bmX = px * LANDMAP_W / mapW;
+
+            float elev = solarElevation(lat, lon, utcHourF, doy);
+            bool land = isLand(bmX, bmY);
+            bool day  = (elev > -0.1f);
+
+            uint8_t shade;
+            if (day && land)   shade = DAY_LAND;
+            else if (day)      shade = DAY_OCEAN;
+            else if (land)     shade = NIGHT_LAND;
+            else               shade = NIGHT_OCEAN;
+
+            canvas.drawPixel(mX + px, mY + py, shade);
+        }
+    }
+
+    // Subsolar point (sun zenith)
+    float sunLat = decl;
+    float sunLon = fmodf((12.0f - utcHourF) * 15.0f + 360.0f, 360.0f);
+    if (sunLon > 180.0f) sunLon -= 360.0f;
+    int sunPx = (int)((sunLon + 180.0f) / 360.0f * mapW);
+    int sunPy = (int)((90.0f - sunLat) / 180.0f * mapH);
+    if (sunPx >= 0 && sunPx < mapW && sunPy >= 0 && sunPy < mapH) {
+        int sx = mX + sunPx, sy = mY + sunPy;
+        canvas.fillCircle(sx, sy, 5, C_WHITE);
+        canvas.drawCircle(sx, sy, 5, C_BLACK);
+        canvas.drawCircle(sx, sy, 4, C_BLACK);
+        for (int a = 0; a < 8; a++) {
+            float ang = a * M_PI / 4.0f;
+            int rx = (int)(8 * cosf(ang));
+            int ry = (int)(8 * sinf(ang));
+            canvas.drawLine(sx + (int)(6 * cosf(ang)), sy + (int)(6 * sinf(ang)),
+                            sx + rx, sy + ry, C_BLACK);
+        }
+    }
+
+    // Sublunar point (moon zenith) — approximate from moon age
+    // Moon is EAST of sun: transits later, so sublunar longitude > subsolar longitude
+    if (moonAgeDays >= 0) {
+        float moonLon = sunLon + (moonAgeDays * 360.0f / 29.53f);
+        if (moonLon < -180.0f) moonLon += 360.0f;
+        if (moonLon > 180.0f) moonLon -= 360.0f;
+        float moonLat = 23.4f * sinf(moonAgeDays * 360.0f / 27.3f * M_PI / 180.0f);
+        int moonPx = (int)((moonLon + 180.0f) / 360.0f * mapW);
+        int moonPy = (int)((90.0f - moonLat) / 180.0f * mapH);
+        if (moonPx >= 0 && moonPx < mapW && moonPy >= 0 && moonPy < mapH) {
+            int mx2 = mX + moonPx, my2 = mY + moonPy;
+            // Crescent: white circle with dark overlay offset to make crescent shape
+            canvas.fillCircle(mx2, my2, 5, C_WHITE);
+            canvas.drawCircle(mx2, my2, 5, C_BLACK);
+            canvas.fillCircle(mx2 + 3, my2, 4, C_BLACK);
+        }
+    }
+
+    canvas.drawRect(mX - 1, mY - 1, mapW + 2, mapH + 2, C_LIGHT);
 }
 
 // ---- Moon tile ----
@@ -281,25 +405,44 @@ void drawMoonDisc(int cx, int cy, int r, float phaseFrac) {
     canvas.drawCircle(cx, cy, r, C_BLACK);
 }
 
-void drawMoonTile(int col, int row, const char* name, float illum, float age) {
+void drawMoonTile(int col, int row, const char* name, float illum, float age,
+                  const char* nextNew, const char* nextFull) {
     int x  = col * TW;
     int y  = row * TH;
     int cx = x + TW / 2;
     drawLabel(cx, y + 10, "MOON");
 
     float phaseFrac = fmodf(age, 29.53f) / 29.53f;
-    drawMoonDisc(cx, y + 115, 55, phaseFrac);
+    drawMoonDisc(cx, y + 95, 50, phaseFrac);
 
     canvas.setTextDatum(TC_DATUM);
     canvas.setTextSize(3);
     canvas.setTextColor(C_BLACK);
-    canvas.drawString(name, cx, y + 185);
+    canvas.drawString(name, cx, y + 160);
 
     char infoBuf[32];
     snprintf(infoBuf, sizeof(infoBuf), "%.0f%%  day %.0f", illum, age);
     canvas.setTextSize(2);
     canvas.setTextColor(C_DARK);
-    canvas.drawString(infoBuf, cx, y + 220);
+    canvas.drawString(infoBuf, cx, y + 195);
+
+    // Next full and new moon dates
+    if (nextFull && nextFull[0]) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "full: %s", nextFull);
+        canvas.setTextSize(2);
+        canvas.setTextColor(C_MID);
+        canvas.setTextDatum(TC_DATUM);
+        canvas.drawString(buf, cx, y + 225);
+    }
+    if (nextNew && nextNew[0]) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "new: %s", nextNew);
+        canvas.setTextSize(2);
+        canvas.setTextColor(C_MID);
+        canvas.setTextDatum(TC_DATUM);
+        canvas.drawString(buf, cx, y + 248);
+    }
 }
 
 // ---- Planets tile ----
@@ -329,23 +472,33 @@ void drawPlanetsTile(int col, int row, JsonObject& planets) {
         return;
     }
 
-    // Dynamic sizing: bigger text when fewer planets
-    int textSz = count <= 3 ? 4 : 3;
     int lineH  = count <= 3 ? 55 : 42;
     int startY = y + 45 + (210 - count * lineH) / 2;
 
-    canvas.setTextDatum(TC_DATUM);
     for (int i = 0; i < count && i < 5; i++) {
         JsonObject p = arr[i];
         const char* pName = p["name"] | "?";
         const char* pDir  = p["dir"]  | "?";
+        int pAlt = p["alt"] | -1;
+        int ly = startY + i * lineH;
 
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%s %s", pName, pDir);
-
-        canvas.setTextSize(textSz);
+        // Planet name left-aligned
+        canvas.setTextDatum(TL_DATUM);
+        canvas.setTextSize(count <= 3 ? 4 : 3);
         canvas.setTextColor(C_BLACK);
-        canvas.drawString(buf, cx, startY + i * lineH);
+        canvas.drawString(pName, x + 12, ly);
+
+        // Direction + altitude right-aligned
+        char detBuf[24];
+        if (pAlt >= 0) {
+            snprintf(detBuf, sizeof(detBuf), "%s %d\xF7", pDir, pAlt);  // 0xF7 = degree symbol
+        } else {
+            snprintf(detBuf, sizeof(detBuf), "%s", pDir);
+        }
+        canvas.setTextDatum(TR_DATUM);
+        canvas.setTextSize(count <= 3 ? 3 : 2);
+        canvas.setTextColor(C_DARK);
+        canvas.drawString(detBuf, x + TW - 12, ly + (count <= 3 ? 6 : 4));
     }
 }
 
@@ -571,9 +724,15 @@ void drawDashboard(JsonObject& widgets, int battPct) {
 
     drawDateTile(0, 0);
 
+    float moonAge = -1;
+    if (widgets.containsKey("moon")) {
+        JsonObject moon = widgets["moon"];
+        moonAge = moon["age_days"] | -1.0f;
+    }
+
     if (widgets.containsKey("sun")) {
         JsonObject sun = widgets["sun"];
-        drawSunTile(1, 0, sun["sunrise"] | "--:--", sun["sunset"] | "--:--");
+        drawSunTile(1, 0, sun["sunrise"] | "--:--", sun["sunset"] | "--:--", moonAge);
     } else {
         drawTile(1, 0, "SUN", "--:--", "no data");
     }
@@ -583,7 +742,9 @@ void drawDashboard(JsonObject& widgets, int battPct) {
         drawMoonTile(2, 0,
                      moon["name"]              | "Unknown",
                      moon["illumination_pct"]  | 0.0f,
-                     moon["age_days"]          | 0.0f);
+                     moon["age_days"]          | 0.0f,
+                     moon["next_new"]          | "",
+                     moon["next_full"]         | "");
     } else {
         drawTile(2, 0, "MOON", "?", "no data");
     }
