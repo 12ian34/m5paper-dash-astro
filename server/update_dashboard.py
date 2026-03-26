@@ -222,8 +222,9 @@ def fetch_aurora() -> dict:
 
         level = status_map.get(status_id, status_id.upper())
 
-        # Get actual nT reading from activity data
+        # Get activity data (current + 24h history)
         nt = None
+        history = []
         try:
             resp2 = client.get(
                 "https://aurorawatch-api.lancs.ac.uk/0.2/status/"
@@ -232,23 +233,30 @@ def fetch_aurora() -> dict:
             resp2.raise_for_status()
             root2 = ET.fromstring(resp2.text)
 
-            # Structure: <activity><value>49.6</value></activity>
-            # Find the last activity element's value child
-            last_val = None
             for activity in root2.findall("activity"):
                 val_elem = activity.find("value")
+                dt_elem = activity.find("datetime")
                 if val_elem is not None and val_elem.text:
                     try:
-                        last_val = float(val_elem.text)
+                        val = float(val_elem.text)
+                        hour = ""
+                        if dt_elem is not None and dt_elem.text:
+                            hour = dt_elem.text[11:13]  # extract HH from ISO
+                        history.append({"h": hour, "nt": round(val)})
                     except (ValueError, TypeError):
                         pass
 
-            if last_val is not None:
-                nt = round(last_val)
+            if history:
+                nt = history[-1]["nt"]
         except Exception:
             pass
 
-        return {"nt": nt, "level": level, "status_color": status_id}
+        return {
+            "nt": nt,
+            "level": level,
+            "status_color": status_id,
+            "history": history,
+        }
 
 
 # ---- ISS ----

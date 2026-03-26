@@ -367,33 +367,89 @@ void drawAuroraTile(int col, int row, JsonObject& aurora) {
 
     const char* level = aurora["level"] | "?";
 
+    // Current nT + level on one line
     if (!aurora["nt"].isNull()) {
         int nt = aurora["nt"] | 0;
-        char ntBuf[16];
-        snprintf(ntBuf, sizeof(ntBuf), "%d nT", nt);
+        char summBuf[32];
+        snprintf(summBuf, sizeof(summBuf), "%d nT  %s", nt, level);
         canvas.setTextDatum(TC_DATUM);
-        canvas.setTextSize(6);
+        canvas.setTextSize(4);
         canvas.setTextColor(C_BLACK);
-        canvas.drawString(ntBuf, cx, y + 65);
+        canvas.drawString(summBuf, cx, y + 50);
     } else {
         canvas.setTextDatum(TC_DATUM);
         canvas.setTextSize(3);
         canvas.setTextColor(C_DARK);
-        canvas.drawString("no reading", cx, y + 85);
+        canvas.drawString(level, cx, y + 55);
     }
 
-    // Activity level
-    canvas.setTextDatum(TC_DATUM);
-    canvas.setTextSize(5);
-    canvas.setTextColor(C_BLACK);
-    canvas.drawString(level, cx, y + 165);
+    // 24-hour bar chart
+    JsonArray history = aurora["history"];
+    int count = history.size();
+    if (count == 0) return;
 
-    // Status bar: filled rectangle under the level to indicate severity
-    const char* color = aurora["status_color"] | "green";
-    if (strcmp(color, "red") == 0 || strcmp(color, "amber") == 0) {
-        // Draw attention bar for elevated activity
-        canvas.fillRect(x + 40, y + 230, TW - 80, 8, C_BLACK);
+    const int chartL  = x + 28;    // left edge (room for axis label)
+    const int chartR  = x + TW - 10;
+    const int chartW  = chartR - chartL;
+    const int chartT  = y + 100;   // top of chart area
+    const int chartB  = y + 245;   // bottom of chart area
+    const int chartH  = chartB - chartT;
+
+    // Find max value for scaling (at least 50 so chart isn't all full)
+    int maxNt = 50;
+    for (int i = 0; i < count; i++) {
+        int v = history[i]["nt"] | 0;
+        if (v > maxNt) maxNt = v;
     }
+    // Round up to a nice ceiling
+    if (maxNt <= 50) maxNt = 50;
+    else if (maxNt <= 100) maxNt = 100;
+    else if (maxNt <= 200) maxNt = 200;
+    else maxNt = ((maxNt / 100) + 1) * 100;
+
+    // Baseline
+    canvas.drawLine(chartL, chartB, chartR, chartB, C_MID);
+
+    // Threshold line at 50 nT (yellow threshold)
+    int y50 = chartB - (50 * chartH / maxNt);
+    for (int dx = chartL; dx < chartR; dx += 6) {
+        canvas.drawPixel(dx, y50, C_LIGHT);
+        canvas.drawPixel(dx + 1, y50, C_LIGHT);
+    }
+
+    // Draw bars
+    int barW = chartW / count;
+    if (barW < 2) barW = 2;
+    int gap = barW > 6 ? 2 : 1;
+
+    for (int i = 0; i < count; i++) {
+        int v = history[i]["nt"] | 0;
+        int barH = v * chartH / maxNt;
+        if (barH < 1 && v > 0) barH = 1;
+        int bx = chartL + i * barW;
+        int by = chartB - barH;
+
+        uint8_t shade = (v >= 100) ? C_BLACK : (v >= 50) ? C_DARK : C_MID;
+        canvas.fillRect(bx, by, barW - gap, barH, shade);
+    }
+
+    // Hour labels: first and last bar
+    canvas.setTextSize(1);
+    canvas.setTextColor(C_MID);
+    const char* firstH = history[0]["h"] | "";
+    const char* lastH  = history[count - 1]["h"] | "";
+    canvas.setTextDatum(TL_DATUM);
+    canvas.drawString(firstH, chartL, chartB + 4);
+    canvas.setTextDatum(TR_DATUM);
+    canvas.drawString(lastH, chartR, chartB + 4);
+
+    // Y-axis max label
+    char maxBuf[8];
+    snprintf(maxBuf, sizeof(maxBuf), "%d", maxNt);
+    canvas.setTextDatum(TR_DATUM);
+    canvas.setTextSize(1);
+    canvas.setTextColor(C_MID);
+    canvas.drawString(maxBuf, chartL - 3, chartT - 2);
 }
 
 // ---- ISS Pass tile ----
