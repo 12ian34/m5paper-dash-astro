@@ -14,10 +14,10 @@ AuroraWatch API ─┘
 ![M5Paper astronomy dashboard](IMG_2614.JPG)
 
 - **Date** — weekday, day month, year (from RTC, synced via NTP)
-- **Sun** — sunrise and sunset times for London
-- **Moon** — phase disc visualisation, phase name, illumination %, day of cycle
-- **Planets** — naked-eye planets visible tonight with compass direction
-- **Aurora** — AuroraWatch UK magnetometer reading (nT) and activity level
+- **Sun** — sunrise and sunset times, plus an equirectangular world map showing the real-time day/night terminator with sun and moon zenith markers
+- **Moon** — phase disc visualisation, phase name, illumination %, day of cycle, and dates of the next full moon and new moon
+- **Planets** — naked-eye planets visible tonight with 16-point compass direction (e.g. SSW, NNE) and altitude above the horizon in degrees
+- **Aurora** — current magnetometer reading (nT) and activity level, plus a 24-hour bar chart of hourly readings with a threshold line at 50 nT
 - **ISS Pass** — next visible pass: time, date, direction, max altitude, duration
 - **Updated / Battery** — small corner inlays at the bottom
 
@@ -163,9 +163,13 @@ On USB power, `M5.shutdown()` can't fully cut power (USB keeps the ESP32 alive).
 
 `serve.py` is a threaded HTTP server that serves the JSON file. It uses `ThreadingTCPServer` because Python's built-in `http.server` is single-threaded and hangs when the ESP32 makes incomplete connections.
 
+### Day/night world map
+
+The sun tile includes a small equirectangular world map rendered pixel-by-pixel on the ESP32. Land outlines come from a 180×90 bitmap (~2 KB in flash) generated from simplified continent polygons. The day/night terminator is calculated from the RTC's UTC time using solar declination and hour angle — no server data needed. Four grayscale shades distinguish day-ocean, day-land, night-ocean, and night-land. The subsolar point is marked with a sun icon and the approximate sublunar point with a crescent.
+
 ### Planet visibility
 
-Planets are computed for 1 hour after the next sunset — the best general viewing time. A planet is shown if its altitude is above 5°. The compass direction (N, NE, E, SE, S, SW, W, NW) tells you where to look.
+Planets are computed for 1 hour after the next sunset — the best general viewing time. A planet is shown if its altitude is above 5°. The 16-point compass direction (N, NNE, NE, ENE, E, ...) and altitude in degrees tell you exactly where to look.
 
 ### ISS pass prediction
 
@@ -174,6 +178,10 @@ A pass is considered "visible" when:
 - Sun is below -6° (civil twilight — dark enough to see the sunlit ISS)
 
 The script searches up to 50 passes to find the next one meeting both criteria.
+
+### Aurora history
+
+The aurora tile shows both the current reading and a 24-hour bar chart. The AuroraWatch API already returns hourly activity for the past 24 hours in its `alerting-site-activity.xml` endpoint — the server collects all values, not just the latest. Bars are shaded by severity: light gray below 50 nT, dark gray 50–100 nT, black above 100 nT. A dashed line marks the 50 nT (yellow/minor) threshold.
 
 ### Aurora thresholds
 
@@ -201,7 +209,11 @@ AuroraWatch UK measures geomagnetic disturbance in nanotesla (nT):
 
 ```
 ├── firmware/
-│   ├── src/main.cpp           # M5Paper firmware (Arduino/ESP32)
+│   ├── src/
+│   │   ├── main.cpp           # M5Paper firmware (Arduino/ESP32)
+│   │   └── landmap.h          # Auto-generated world land-mask bitmap (PROGMEM)
+│   ├── tools/
+│   │   └── gen_landmap.py     # One-time script to regenerate landmap.h
 │   ├── platformio.ini         # PlatformIO config
 │   └── load_env.py            # Build script: injects .env as compiler flags
 ├── server/
