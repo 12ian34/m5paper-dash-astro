@@ -110,17 +110,6 @@ void setup() {
         canvas.pushCanvas(0, 0, UPDATE_MODE_GC16);
     };
 
-    showStatus("WiFi connected", WiFi.localIP().toString().c_str());
-    esp_task_wdt_reset();
-    delay(1500);
-
-    esp_wifi_set_max_tx_power(8);
-
-    showStatus("Preparing fetch...");
-    esp_task_wdt_reset();
-    delay(5000);
-    esp_task_wdt_reset();
-
     showStatus("Fetching dashboard...");
     esp_task_wdt_reset();
 
