@@ -106,13 +106,37 @@ M5.RTC.getTime(&time); M5.RTC.getDate(&date);
 
 ## WiFi + HTTP
 
-```cpp
-WiFi.begin("SSID", "PASS");
-int attempts = 0;
-while (WiFi.status() != WL_CONNECTED && attempts++ < 40) delay(250);
+**Marginal WiFi / task WDT**: A fixed-count loop with `delay(250)` and no `esp_task_wdt_reset()` can hit the default **30s task watchdog** while associating, so the screen never leaves BOOTING. Use a **millis() deadline** (e.g. 45s), call **`esp_task_wdt_reset()`** each iteration, and optionally log status every 5s on Serial.
 
+**Clean STA after RTC wake**: Before `WiFi.mode(WIFI_STA)`, reset driver state without wiping stored credentials:
+
+```cpp
+WiFi.disconnect(true, false);  // second arg false: do NOT erase NVS WiFi storage
+WiFi.mode(WIFI_OFF);
+delay(100);
+esp_task_wdt_reset();
+
+WiFi.mode(WIFI_STA);
+WiFi.setSleep(false);
+WiFi.begin("SSID", "PASS");
+
+const unsigned long wifiDeadlineMs = 45000;
+const unsigned long wifiStarted = millis();
+unsigned long lastWifiLog = wifiStarted;
+while (WiFi.status() != WL_CONNECTED && (millis() - wifiStarted) < wifiDeadlineMs) {
+    esp_task_wdt_reset();
+    delay(250);
+    if (millis() - lastWifiLog >= 5000) {
+        lastWifiLog = millis();
+        Serial.printf("WiFi status=%d elapsed=%lu ms\n", (int)WiFi.status(), millis() - wifiStarted);
+    }
+}
+```
+
+```cpp
 HTTPClient http;
 http.begin("http://host:port/path");
+// log + esp_task_wdt_reset() before/after long GET as needed
 if (http.GET() == 200) {
     String payload = http.getString();
     // parse with ArduinoJson
@@ -128,6 +152,8 @@ WiFi.disconnect(true);
 **Correct order**: fetch → parse → **draw** → syncTime → disconnect → sleep
 
 **Wrong order** (causes apparent "fetch hang" on battery): fetch → syncTime → parse → draw
+
+At the start of `syncTime()`, call `esp_task_wdt_reset()` before `configTzTime()` so slow NTP does not starve the task WDT before your loop runs again.
 
 ## Power management
 
@@ -160,6 +186,8 @@ void loop() {
 
 **On USB**: `shutdown()` can't fully power off. `loop()` re-arms the alarm and calls `ESP.restart()` after the interval.
 
+**Wake vs rear reset (battery):** From full off after shutdown, **wake** with **RTC alarm**, **USB**, or **long-press side PWR**. The **rear reset does not power the board on** when there is no battery/USB rail — it only resets an already-powered ESP32.
+
 ### Why NOT ESP32 deep sleep
 
 We tested `esp_deep_sleep_start()` with `gpio_hold_en` on GPIO2. **Unreliable:**
@@ -179,8 +207,8 @@ if (M5.BtnP.wasPressed()) { /* side toggle click  (GPIO38) */ }
 if (M5.BtnR.wasPressed()) { /* side toggle right (GPIO37) */ }
 ```
 
-- **Rear button (reset)**: hardware reset, works ANY time — even after `M5.shutdown()`.
-- **Side toggle**: only works while ESP32 is powered on. **Cannot** wake from `M5.shutdown()`.
+- **Rear button (reset)**: hardware reset when the ESP32 **already has power** (USB or battery rail on). After `M5.shutdown()` on **battery alone**, the unit is off — rear reset does **not** apply power; use RTC / USB / long-press PWR to wake.
+- **Side toggle**: only works while ESP32 is powered on. **Cannot** wake from full `M5.shutdown()` off state.
 
 ## USB serial
 - macOS: `/dev/cu.usbserial-*` (port name changes on reconnect)
@@ -193,7 +221,7 @@ if (M5.BtnR.wasPressed()) { /* side toggle right (GPIO37) */ }
 3. Calling `GetHumidity()` instead of `GetRelHumidity()`
 4. Using `board = m5paper` in PlatformIO (use `m5stack-fire`)
 5. Forgetting `fillCanvas()` before redraw (canvas retains content)
-6. Not adding timeout to WiFi connection loop
+6. WiFi wait without feeding the task WDT (use millis deadline + `esp_task_wdt_reset()` each iteration)
 7. Using `esp_deep_sleep_start()` instead of `M5.shutdown()`
 8. Not handling USB case in `loop()` when using `M5.shutdown()`
 9. Running syncTime/NTP before draw on battery

@@ -47,6 +47,8 @@ No API keys required — all data sources are free and open.
 
 The e-ink display retains its image with zero power — like printed paper. The device is fully off between refreshes; only the RTC ticks to trigger the next wake.
 
+**Resets and wake from full off (battery):** After `M5.shutdown()`, the unit is powered down. **Wake** with the **RTC alarm**, **USB power**, or **long-press the side PWR button**. The **rear reset button does not turn the device on** from that state on battery alone (no rail power). While the ESP32 is already running, rear reset still reboots the firmware.
+
 ### Raspberry Pi
 
 Any Pi that can run Python and stay on your network. Serves the dashboard JSON over HTTP on port 8081.
